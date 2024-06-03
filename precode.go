@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 
 // Generator генерирует последовательность чисел 1,2,3 и т.д. и
@@ -15,8 +16,7 @@ func Generator(ctx context.Context, ch chan<- int64, fn func(int64)) {
 	// 1. Функция Generator
 	defer close(ch)
 	var i int64 = 1
-	const maxNum = 100
-	for i <= maxNum {
+	for {
 		select {
 		case ch <- i:
 			fn(i)
@@ -34,6 +34,7 @@ func Worker(in <-chan int64, out chan<- int64) {
 	defer close(out)
 	for number := range in {
 		out <- number
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -41,17 +42,21 @@ func main() {
 	chIn := make(chan int64)
 
 	// 3. Создание контекста
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// для проверки будем считать количество и сумму отправленных чисел
 	var inputSum int64   // сумма сгенерированных чисел
 	var inputCount int64 // количество сгенерированных чисел
 
+	var mu sync.Mutex
+
 	// генерируем числа, считая параллельно их количество и сумму
 	go Generator(ctx, chIn, func(i int64) {
+		mu.Lock()
 		inputSum += i
 		inputCount++
+		mu.Unlock()
 	})
 
 	const NumOut = 5 // количество обрабатывающих горутин и каналов
@@ -76,8 +81,10 @@ func main() {
 		go func(i int) {
 			defer wg.Done()
 			for number := range outs[i] {
+				mu.Lock()
 				amounts[i]++
 				chOut <- number
+				mu.Unlock()
 			}
 		}(i)
 	}
